@@ -1,6 +1,6 @@
 # coding:utf-8
 import chainer
-from chainer import Function, Variable, optimizers, serializers
+from chainer import Function, Variable, optimizers, serializers, cuda
 from chainer import Link, Chain
 import chainer.functions as F
 import chainer.links as L
@@ -43,6 +43,10 @@ class NeuralNetwork:
     def policy_greedy(self, actions):
         return np.max(actions.data, axis = 1)
 
+    def use_GPU(self):
+        gpu_device = 0
+        self.model.to_gpu(gpu_device)
+        
 class Gragh:
     def gragh(self, result, epoch):
         x = np.arange(0, epoch, 1)
