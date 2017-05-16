@@ -100,6 +100,8 @@ class DeepQNetwork:
         serializers.save_npz(self.model_name, self.Q_network)
         
     def load_weight(self):
+        import os.path
+        if os.path.exists(self.model_name) == False: return
         serializers.load_npz(self.model_name, self.Q_network)
     
     def deep_lean(self, now_state, action, next_state, reward, terminal, action_list):
