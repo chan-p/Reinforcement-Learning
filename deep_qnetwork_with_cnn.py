@@ -33,7 +33,7 @@ class DeepQNetworkWithCNN:
         self.record     = deque()
         self.model_name = model_name
         self.__action_num = num_out
-        self.__ww = np.array([[255 for _ in range(self.__FRAME_WIDTH)] for _ in range(self.__FRAME_HEIGHT)])
+        self.__ww = self.xp.array([[255 for _ in range(self.__FRAME_WIDTH)] for _ in range(self.__FRAME_HEIGHT)])
         self.__repeat_action = None
         self.__repeat_max_action = None
         self.__repeat_action_list = None
@@ -54,20 +54,20 @@ class DeepQNetworkWithCNN:
         return cv2.resize(cv2.cvtColor(state, cv2.COLOR_RGB2GRAY), (self.__FRAME_WIDTH, self.__FRAME_HEIGHT))
 
     def pre_proccesing(self, now_state, last_state):
-        process_state = np.maximum(now_state, last_state)
+        process_state = self.xp.maximum(now_state, last_state)
         gray_state = self.__rgb2gry(process_state)
-        process_state = np.array(gray_state, dtype = np.float32)
+        process_state = self.xp.array(gray_state, dtype = self.xp.float32)
         process_state = process_state / self.__ww
         return process_state
 
     def get_initial_state(self, now_state, last_state):
-        process_state = np.maximum(now_state, last_state)
+        process_state = self.xp.maximum(now_state, last_state)
         gray_state = self.__rgb2gry(process_state)
-        process_state = np.array(gray_state, dtype = np.float32)
+        process_state = self.xp.array(gray_state, dtype = self.xp.float32)
         process_state = process_state / self.__ww
         # 4フレーム分コピーする
         state = [process_state for _ in range(self.__STATE_LENGTH)]
-        return np.array(state, dtype=np.float32)
+        return self.xp.array(state, dtype=self.xp.float32)
 
     def __backpropagation(self, loss):
         loss.backward()
@@ -143,15 +143,15 @@ class DeepQNetworkWithCNN:
             return self.__repeat_action, self.__repeat_max_action, self.__repeat_action_list
         state_vec = self.__get_state_vec(state, 2)
         qvalue = self.__forward(0, state_vec, model).data[0]
-        self.__repeat_action = np.argmax(qvalue)
+        self.__repeat_action = self.xp.argmax(qvalue)
         self.__repeat_max_action = max(qvalue)
         self.__repeat_action_list = qvalue
-        return (np.argmax(qvalue) if random.random() > self.EPSIL else random.choice([i for i in range(self.__action_num)])), max(qvalue), qvalue
+        return (self.xp.argmax(qvalue) if random.random() > self.EPSIL else random.choice([i for i in range(self.__action_num)])), max(qvalue), qvalue
 
     def policy_greedy(self, state, model):
         state_vec = self.__get_state_vec(state, 2)
         qvalue = self.__forward(0, state_vec, model).data[0]
-        return np.argmax(qvalue), max(qvalue), qvalue
+        return self.xp.argmax(qvalue), max(qvalue), qvalue
 
     def experience_replay(self):
         state_vecs, actions, rewards, terminals, next_state_vecs = self.__transelate()
