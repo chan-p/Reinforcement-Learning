@@ -12,6 +12,7 @@ from collections import deque
 
 class DeepQNetworkWithCNN:
     def __init__(self, num_hid1, num_hid2, num_out, pu, epsil, gamma, batch_size, model_name):
+        self.xp         = cuda.cupy if pu == "GPU" else np
         self.__STATE_LENGTH = 4  # 状態を構成するフレーム数
         self.__FRAME_WIDTH = 128  # リサイズ後のフレーム幅
         self.__FRAME_HEIGHT = 128  # リサイズ後のフレーム高さ
@@ -21,12 +22,12 @@ class DeepQNetworkWithCNN:
             conv2= L.Convolution2D(32, 256,  5, pad=2),
             conv3= L.Convolution2D(256, 32,  3, pad=1),
             nn4  = L.Linear(num_hid1, num_hid2),
-            nn5  = L.Linear(num_hid2, num_out, initialW=np.zeros((num_out, num_hid2), dtype=np.float32))
+            nn5  = L.Linear(num_hid2, 100),
+            nn6  = L.Linear(100, num_out, initialW=self.xp.zeros((num_out, num_hid2), dtype=self.xp.float32))
         )
         self.Target_network = copy.deepcopy(self.Q_network)
         self.optimizer = optimizers.Adam()
         self.optimizer.setup(self.Q_network)
-        self.xp         = cuda.cupy if pu == "GPU" else np
         self.EPSIL      = epsil
         self.GAMMA      = gamma
         self.BATCH_SIZE = batch_size
@@ -39,15 +40,18 @@ class DeepQNetworkWithCNN:
         self.__repeat_action_list = None
         self.__step = 0
         self.action_interval = 4
+        self.__action_list   = [i for i in range(self.__action_num)]
+        print(self.__action_list)
 
     def __forward(self, flg, x, model, t = None):
         _x = Variable(x)
         if flg == 1: _t = Variable(t)
-        h1 = F.max_pooling_2d(F.local_response_normalization(F.leaky_relu(self.Q_network.conv1(_x))), 3, stride=2)
-        h2 = F.max_pooling_2d(F.local_response_normalization(F.leaky_relu(self.Q_network.conv2(h1))), 3, stride=2)
+        h1 = F.max_pooling_2d(F.leaky_relu(self.Q_network.conv1(_x)), 3, stride=2)
+        h2 = F.max_pooling_2d(F.leaky_relu(self.Q_network.conv2(h1)), 3, stride=2)
         h3 = F.max_pooling_2d(F.leaky_relu(self.Q_network.conv3(h2)), 3, stride=2)
-        h4 = F.leaky_relu(self.Q_network.nn4(h3))
-        u3 = self.Q_network.nn5(h4)
+        h4 = F.dropout(F.leaky_relu(self.Q_network.nn4(h3)))
+        h5 = F.dropout(F.leaky_relu(self.Q_network.nn5(h4)))
+        u3 = self.Q_network.nn6(h5)
         return F.mean_squared_error(u3, _t) if flg else u3
 
     def __rgb2gry(self, state):
@@ -111,6 +115,21 @@ class DeepQNetworkWithCNN:
             terminals.append(data[4])
         return self.xp.array(state_vecs, dtype=self.xp.float32), self.xp.array(actions), self.xp.array(rewards), self.xp.array(terminals), self.xp.array(next_state_vecs, dtype=self.xp.float32)
 
+    def __transelate_ver2(self):
+        state_vecs  = []
+        actions     = []
+        rewards     = []
+        terminals   = []
+        next_state_vecs = []
+        record = random.sample(self.record, self.BATCH_SIZE)
+        for data in record:
+            state_vecs.append(self.__get_state_vec(list(data[0]), 1))
+            actions.append(data[1])
+            next_state_vecs.append(self.__get_state_vec(list(data[2]), 1))
+            rewards.append(data[3])
+            terminals.append(data[4])
+        return self.xp.array(state_vecs, dtype=self.xp.float32), self.xp.array(actions), self.xp.array(rewards), self.xp.array(terminals), self.xp.array(next_state_vecs, dtype=self.xp.float32)
+
     def init_record(self):
         self.record.popleft()
 
@@ -146,7 +165,7 @@ class DeepQNetworkWithCNN:
         self.__repeat_action = self.xp.argmax(qvalue)
         self.__repeat_max_action = max(qvalue)
         self.__repeat_action_list = qvalue
-        return (self.xp.argmax(qvalue) if random.random() > self.EPSIL else random.choice([i for i in range(self.__action_num)])), max(qvalue), qvalue
+        return (self.xp.argmax(qvalue) if random.random() > self.EPSIL else random.choice(self.__action_list)), max(qvalue), qvalue
 
     def policy_greedy(self, state, model):
         state_vec = self.__get_state_vec(state, 2)
@@ -167,3 +186,16 @@ class DeepQNetworkWithCNN:
             for index in range(len(x_batch_action)):
                 y_batch_targets.append(self.__make_target(x_batch_state_vecs[index], x_batch_action[index], x_batch_rewards[index], x_batch_next_state_vecs[index], x_batch_terminals[index]))
             self.__neural_network(x_batch_state_vecs, y_batch_targets)
+
+    def experience_replay_ver2(self):
+        state_vecs, actions, rewards, terminals, next_state_vecs = self.__transelate_ver2()
+        start = 0
+        x_batch_state_vecs   = state_vecs[start:start+self.BATCH_SIZE]
+        x_batch_action       = actions[start:start+self.BATCH_SIZE]
+        x_batch_rewards      = rewards[start:start+self.BATCH_SIZE]
+        x_batch_terminals    = terminals[start:start+self.BATCH_SIZE]
+        y_batch_targets      = []
+        x_batch_next_state_vecs = next_state_vecs[start:start+self.BATCH_SIZE]
+        for index in range(len(x_batch_action)):
+            y_batch_targets.append(self.__make_target(x_batch_state_vecs[index], x_batch_action[index], x_batch_rewards[index], x_batch_next_state_vecs[index], x_batch_terminals[index]))
+        self.__neural_network(x_batch_state_vecs, y_batch_targets)

@@ -5,15 +5,25 @@ class DSP:
     def __init__(self, num_Qaction):
         self.__num_Qaction = num_Qaction
         self.__bandit_Epsil = bandit.EpsilonGreedy(0.4, num_Qaction)
+        self.__bandit_UCB   = bandit.UpperConfidenceBound(num_Qaction)
 
     def push_ad_random(self):
         return random.choice([i for i in range(self.__num_Qaction)])
 
+    def reserve_reward_random(self, reward):
+        return
+
     def push_ad_Egreedy(self):
         return self.__bandit_Epsil.get_action()
 
-    def serve_reward(self, action, reward):
-        self.__bandit_Epsil.serve_reward(action, reward)
+    def reserve_reward_Egreedy(self, action, reward):
+        self.__bandit_Epsil.reserve_reward(action, reward)
+
+    def push_ad_UCB(self):
+        return self.__bandit_UCB.get_action()
+
+    def reserve_reward_UCB(self, reward):
+        self.__bandit_UCB.reserve_reward(reward)
 
 class User:
     def __init__(self, context_info):
@@ -63,23 +73,30 @@ def run():
     user = User(user_context)
     ad = Advertise(ad_attribute)
     ad.generate()
-    total_imp = 100000
+    total_imp = 100000000
     dsp = DSP(ad.num_pattern)
     imp = [0 for i in range(ad.num_pattern)]
     click = [0 for i in range(ad.num_pattern)]
     for index in range(total_imp):
         user.generate()
-        # push_ad_number = dsp.push_ad_random()
-        push_ad_number = dsp.push_ad_Egreedy()
+        push_ad_number = dsp.push_ad_random()
+        # push_ad_number = dsp.push_ad_Egreedy()
+        # push_ad_number = dsp.push_ad_UCB()
         imp[push_ad_number] += 1
         if user.judge_click(user, ad.attribute_pattern[push_ad_number]):
             click[push_ad_number] += 1
-            dsp.serve_reward(push_ad_number, 1)
+            dsp.reserve_reward_random(1)
+            dsp.reserve_reward_Egreedy(push_ad_number, 1)
+            #dsp.reserve_reward_UCB(1)
         else:
-            dsp.serve_reward(push_ad_number, 0)
-
+            dsp.reserve_reward_random(0)
+            dsp.reserve_reward_Egreedy(push_ad_number, 0)
+            #dsp.reserve_reward_UCB(0)
+    total_CTR = 0.
     for index in range(ad.num_pattern):
         print(ad.attribute_pattern[index], click[index]/imp[index])
+        total_CTR += click[index]/imp[index]
+    print(total_CTR/ad.num_pattern)
 
 if __name__=="__main__":
     run()
