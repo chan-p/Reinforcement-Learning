@@ -14,19 +14,20 @@ class DeepQNetworkWithCNN:
     def __init__(self, num_hid1, num_hid2, num_out, pu, epsil, gamma, batch_size, model_name):
         self.xp         = cuda.cupy if pu == "GPU" else np
         self.__STATE_LENGTH = 4  # 状態を構成するフレーム数
-        self.__FRAME_WIDTH = 128  # リサイズ後のフレーム幅
-        self.__FRAME_HEIGHT = 128  # リサイズ後のフレーム高さ
+        self.__FRAME_WIDTH = 84  # リサイズ後のフレーム幅
+        self.__FRAME_HEIGHT = 84  # リサイズ後のフレーム高さ
 
         self.Q_network = Chain(
-            conv1= L.Convolution2D(self.__STATE_LENGTH, 32, 8, stride=4),
-            conv2= L.Convolution2D(32, 256,  5, pad=2),
-            conv3= L.Convolution2D(256, 32,  3, pad=1),
+            conv1= L.Convolution2D(self.__STATE_LENGTH, 32, 8, stride=4, wscale=np.sqrt(2)),
+            conv2= L.Convolution2D(32, 64, ksize=4, stride=2, wscale=np.sqrt(2)),
+            conv3= L.Convolution2D(64, 64, ksize=3, stride=1, wscale=np.sqrt(2)),
             nn4  = L.Linear(num_hid1, num_hid2),
-            nn5  = L.Linear(num_hid2, 100),
-            nn6  = L.Linear(100, num_out, initialW=self.xp.zeros((num_out, num_hid2), dtype=self.xp.float32))
+            nn5  = L.Linear(num_hid2, 512),
+            nn6  = L.Linear(512, num_out, initialW=self.xp.zeros((num_out, num_hid2), dtype=self.xp.float32))
         )
+        self.num_action = num_out
         self.Target_network = copy.deepcopy(self.Q_network)
-        self.optimizer = optimizers.Adam()
+        self.optimizer = optimizers.RMSpropGraves(lr=0.00025, alpha=0.95, momentum=0.95, eps=0.01)
         self.optimizer.setup(self.Q_network)
         self.EPSIL      = epsil
         self.GAMMA      = gamma
@@ -39,20 +40,49 @@ class DeepQNetworkWithCNN:
         self.__repeat_max_action = None
         self.__repeat_action_list = None
         self.__step = 0
-        self.action_interval = 4
+        self.action_interval = 1
         self.__action_list   = [i for i in range(self.__action_num)]
+        self.action_flozen   = False
         print(self.__action_list)
 
     def __forward(self, flg, x, model, t = None):
         _x = Variable(x)
         if flg == 1: _t = Variable(t)
-        h1 = F.max_pooling_2d(F.leaky_relu(self.Q_network.conv1(_x)), 3, stride=2)
-        h2 = F.max_pooling_2d(F.leaky_relu(self.Q_network.conv2(h1)), 3, stride=2)
-        h3 = F.max_pooling_2d(F.leaky_relu(self.Q_network.conv3(h2)), 3, stride=2)
+        h1 = F.leaky_relu(self.Q_network.conv1(_x))
+        h2 = F.leaky_relu(self.Q_network.conv2(h1))
+        h3 = F.leaky_relu(self.Q_network.conv3(h2))
         h4 = F.dropout(F.leaky_relu(self.Q_network.nn4(h3)))
         h5 = F.dropout(F.leaky_relu(self.Q_network.nn5(h4)))
         u3 = self.Q_network.nn6(h5)
         return F.mean_squared_error(u3, _t) if flg else u3
+
+    def __forward_loss_clip(self, flg, x, model, t = None):
+        _x = Variable(x)
+        h1 = F.leaky_relu(self.Q_network.conv1(_x))
+        h2 = F.leaky_relu(self.Q_network.conv2(h1))
+        h3 = F.leaky_relu(self.Q_network.conv3(h2))
+        h4 = F.dropout(F.leaky_relu(self.Q_network.nn4(h3)))
+        h5 = F.dropout(F.leaky_relu(self.Q_network.nn5(h4)))
+        u3 = self.Q_network.nn6(h5)
+
+        td = Variable(t) - u3
+        td_tmp = td.data + 1000.0 * (abs(td.data) <= 1)
+        td_clip = td * (abs(td.data) <= 1) + td/abs(td_tmp) * (abs(td.data) > 1)
+        zero_val = Variable(np.zeros((self.BATCH_SIZE, self.num_action), dtype=np.float32))
+        loss = F.mean_squared_error(td_clip, zero_val)
+        return F.mean_squared_error(td_clip, zero_val)
+
+    def __neural_network(self, state_vec, y_target):
+        y_target = self.xp.array(y_target, dtype=self.xp.float32)
+        self.__init_grads()
+        loss = self.__forward(1, state_vec, self.Q_network, y_target)
+        self.__backpropagation(loss)
+
+    def __neural_network_ver2(self, state_vec, y_target):
+        y_target = self.xp.array(y_target, dtype=self.xp.float32)
+        self.__init_grads()
+        loss = self.__forward_loss_clip(1, state_vec, self.Q_network, y_target)
+        self.__backpropagation(loss)
 
     def __rgb2gry(self, state):
         return cv2.resize(cv2.cvtColor(state, cv2.COLOR_RGB2GRAY), (self.__FRAME_WIDTH, self.__FRAME_HEIGHT))
@@ -94,12 +124,6 @@ class DeepQNetworkWithCNN:
         self.EPSIL = tmp
         y_target[action] = reward if terminal else reward + self.GAMMA * action_list_tar[action]
         return self.xp.array(y_target, dtype=self.xp.float32)
-
-    def __neural_network(self, state_vec, y_target):
-        y_target = self.xp.array(y_target, dtype=self.xp.float32)
-        self.__init_grads()
-        loss = self.__forward(1, state_vec, self.Q_network, y_target)
-        self.__backpropagation(loss)
 
     def __transelate(self):
         state_vecs  = []
@@ -152,20 +176,16 @@ class DeepQNetworkWithCNN:
             return
         serializers.load_npz(self.model_name, self.Q_network)
 
-    def deep_lean(self, now_state, action, next_state, reward, terminal, action_list):
-        state_vec = self.__get_state_vec(now_state, 2)
-        target = [self.__make_target(action, reward, next_state, terminal, action_list)]
-        self.__neural_network(state_vec, target)
-
     def policy_egreedy(self, state, model, step):
         if step % self.action_interval != 0:
             return self.__repeat_action, self.__repeat_max_action, self.__repeat_action_list
         state_vec = self.__get_state_vec(state, 2)
         qvalue = self.__forward(0, state_vec, model).data[0]
-        self.__repeat_action = self.xp.argmax(qvalue)
+        action = random.choice([i for i, x in enumerate(qvalue) if x == max(qvalue)])
+        self.__repeat_action = action
         self.__repeat_max_action = max(qvalue)
         self.__repeat_action_list = qvalue
-        return (self.xp.argmax(qvalue) if random.random() > self.EPSIL else random.choice(self.__action_list)), max(qvalue), qvalue
+        return (action if random.random() > self.EPSIL else random.choice(self.__action_list)), max(qvalue), qvalue
 
     def policy_greedy(self, state, model):
         state_vec = self.__get_state_vec(state, 2)
@@ -198,4 +218,4 @@ class DeepQNetworkWithCNN:
         x_batch_next_state_vecs = next_state_vecs[start:start+self.BATCH_SIZE]
         for index in range(len(x_batch_action)):
             y_batch_targets.append(self.__make_target(x_batch_state_vecs[index], x_batch_action[index], x_batch_rewards[index], x_batch_next_state_vecs[index], x_batch_terminals[index]))
-        self.__neural_network(x_batch_state_vecs, y_batch_targets)
+        self.__neural_network_ver2(x_batch_state_vecs, y_batch_targets)

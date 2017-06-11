@@ -2,6 +2,17 @@ import math
 import random
 import numpy as np
 
+class Random:
+    def __init__(self, num_Qaction):
+        self.__num_Qaction = num_Qaction
+        self.__action_list = [i for i in range(num_Qaction)]
+
+    def get_action(self):
+        return random.choice(self.__action_list)
+
+    def reserve_reward(self, reward):
+        return
+
 class EpsilonGreedy:
     def __init__(self, epsilon, num_Qaction):
         self.EPSILON = epsilon
@@ -11,12 +22,14 @@ class EpsilonGreedy:
         self.__reward_list = [0 for i in range(num_Qaction)]
         self.__reward_ave  = [0 for i in range(num_Qaction)]
         self.__use_action = []
+        self.__now_action = None
 
     def __first_get_action(self):
         action = random.choice(self.__first_action_list)
         self.__use_action.append(action)
         self.__first_action_list = list(set(self.__first_action_list) - set([action]))
-        return action
+        self.__now_action = action
+        return self.__now_action
 
     def get_action(self):
         if len(self.__first_action_list) != 0:
@@ -24,9 +37,9 @@ class EpsilonGreedy:
         else:
             return np.argmax(self.__reward_ave) if random.random() > self.EPSILON else random.choice([i for i in range(self.__num_Qaction)])
 
-    def reserve_reward(self, action, reward):
-        self.__reward_list[action] += reward
-        self.__reward_ave[action] = self.__reward_list[action] / self.__action_list[action]
+    def reserve_reward(self, reward):
+        self.__reward_list[self.__now_action] += reward
+        self.__reward_ave[self.__now_action] = self.__reward_list[self.__now_action] / self.__action_list[self.__now_action]
 
 class UpperConfidenceBound:
     def __init__(self, num_Qaction):

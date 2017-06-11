@@ -2,28 +2,23 @@ import random
 import bandit
 
 class DSP:
-    def __init__(self, num_Qaction):
+    def __init__(self, num_Qaction, mode):
+        self.mode = mode
         self.__num_Qaction = num_Qaction
-        self.__bandit_Epsil = bandit.EpsilonGreedy(0.4, num_Qaction)
-        self.__bandit_UCB   = bandit.UpperConfidenceBound(num_Qaction)
+        if mode == "Random":
+            self.bandit = bandit.Random(num_Qaction)
+        elif mode == "EpsilonGreedy":
+            self.bandit = bandit.EpsilonGreedy(0.4, num_Qaction)
+        elif mode == "UpperConfidenceBound":
+            self.bandit = bandit.UpperConfidenceBound(num_Qaction)
+        else:
+            print("Mode Error")
 
-    def push_ad_random(self):
-        return random.choice([i for i in range(self.__num_Qaction)])
+    def push_ad(self):
+        return self.bandit.get_action()
 
-    def reserve_reward_random(self, reward):
-        return
-
-    def push_ad_Egreedy(self):
-        return self.__bandit_Epsil.get_action()
-
-    def reserve_reward_Egreedy(self, action, reward):
-        self.__bandit_Epsil.reserve_reward(action, reward)
-
-    def push_ad_UCB(self):
-        return self.__bandit_UCB.get_action()
-
-    def reserve_reward_UCB(self, reward):
-        self.__bandit_UCB.reserve_reward(reward)
+    def reserve_reward(self, reward):
+        self.bandit.reserve_reward(reward)
 
 class User:
     def __init__(self, context_info):
@@ -67,31 +62,20 @@ class Advertise:
             if pattern not in self.attribute_pattern: self.attribute_pattern.append(pattern)
             if len(self.attribute_pattern) == self.num_pattern: break
 
-def run():
-    user_context = [[(0, 30), (1, 70)], [(0, 10), (1, 20), (2, 30), (3, 40)]]
-    ad_attribute = [[(10, 2), (2, 10)], [(2, 3, 1, 1), (10, 2, 2, 5)]]
-    user = User(user_context)
-    ad = Advertise(ad_attribute)
-    ad.generate()
-    total_imp = 100000000
-    dsp = DSP(ad.num_pattern)
+def run(user, ad, dsp, total_imp):
+    print("Total_Imp:" + str(total_imp))
     imp = [0 for i in range(ad.num_pattern)]
     click = [0 for i in range(ad.num_pattern)]
     for index in range(total_imp):
         user.generate()
-        push_ad_number = dsp.push_ad_random()
-        # push_ad_number = dsp.push_ad_Egreedy()
-        # push_ad_number = dsp.push_ad_UCB()
+        push_ad_number = dsp.push_ad()
         imp[push_ad_number] += 1
         if user.judge_click(user, ad.attribute_pattern[push_ad_number]):
             click[push_ad_number] += 1
-            dsp.reserve_reward_random(1)
-            dsp.reserve_reward_Egreedy(push_ad_number, 1)
-            #dsp.reserve_reward_UCB(1)
+            dsp.reserve_reward(1)
         else:
-            dsp.reserve_reward_random(0)
-            dsp.reserve_reward_Egreedy(push_ad_number, 0)
-            #dsp.reserve_reward_UCB(0)
+            dsp.reserve_reward(0)
+
     total_CTR = 0.
     for index in range(ad.num_pattern):
         print(ad.attribute_pattern[index], click[index]/imp[index])
@@ -99,4 +83,13 @@ def run():
     print(total_CTR/ad.num_pattern)
 
 if __name__=="__main__":
-    run()
+    user_context = [[(0, 30), (1, 70)], [(0, 10), (1, 20), (2, 30), (3, 40)]]
+    ad_attribute = [[(10, 2), (2, 10)], [(2, 3, 1, 1), (10, 2, 2, 5)]]
+    user = User(user_context)
+    ad   = Advertise(ad_attribute)
+    ad.generate()
+    dsp = DSP(ad.num_pattern, "Random")
+    # dsp = DSP(ad.num_pattern, "EpsilonGreedy")
+    # dsp = DSP(ad.num_pattern, "UpperConfidenceBound")
+    print("Mode:" + dsp.mode)
+    run(user, ad, dsp, 1000000)
