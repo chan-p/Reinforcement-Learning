@@ -177,7 +177,7 @@ class DeepQNetworkWithCNN:
         serializers.load_npz(self.model_name, self.Q_network)
 
     def policy_egreedy(self, state, model, step):
-        if step % self.action_interval != 0:
+        if step % 4 != 0:
             return self.__repeat_action, self.__repeat_max_action, self.__repeat_action_list
         state_vec = self.__get_state_vec(state, 2)
         qvalue = self.__forward(0, state_vec, model).data[0]
